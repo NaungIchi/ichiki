@@ -22,6 +22,54 @@ body.dark {
   min-height: 48px;
 }
 
+/* Make the month selector follow the active light/dark theme. */
+.month-picker {
+  color: var(--muted);
+}
+
+.month-picker select,
+.mini-picker select {
+  min-width: 0;
+  min-height: 42px;
+  padding: 0 36px 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  outline: none;
+  background-color: var(--surface-solid);
+  color: var(--text);
+  color-scheme: inherit;
+  accent-color: var(--blue);
+  transition: border-color .18s ease, box-shadow .18s ease, background-color .18s ease;
+}
+
+body.dark .month-picker select,
+body.dark .mini-picker select {
+  background-color: rgba(7, 11, 22, .72);
+}
+
+.month-picker select:hover,
+.mini-picker select:hover {
+  border-color: rgba(79, 140, 255, .5);
+}
+
+.month-picker select:focus-visible,
+.mini-picker select:focus-visible {
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, .16);
+}
+
+.month-picker select option,
+.mini-picker select option {
+  background: var(--surface-solid);
+  color: var(--text);
+}
+
+body.dark .month-picker select option,
+body.dark .mini-picker select option {
+  background: #0d1424;
+  color: #f2f6ff;
+}
+
 /* Final compact floating add-transaction button */
 .floating-add-transaction {
   position: fixed;
@@ -74,20 +122,6 @@ body.dark .sidebar {
   color: var(--text);
 }
 
-@media (max-width: 760px) {
-  .main-nav {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .main-nav .nav-item {
-    justify-content: flex-start;
-    text-align: left;
-  }
-}
-
-/* Theme-aware, responsive modal surface and fields. */
 body.modal-open {
   overflow: hidden;
 }
@@ -228,7 +262,6 @@ body.dark .transaction-modal select {
   box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.16);
 }
 
-/* Native select menus inherit the page theme where the browser supports it. */
 select {
   color-scheme: inherit;
 }
@@ -237,7 +270,6 @@ select {
   display: none;
 }
 
-/* Keep transaction tables and bar charts inside their containers. */
 .table-wrap {
   width: 100%;
   max-width: 100%;
@@ -282,6 +314,27 @@ select {
 
 .budget-bar-card.over .bar-fill {
   background: linear-gradient(90deg, var(--yellow), var(--red));
+}
+
+@media (max-width: 760px) {
+  .main-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .main-nav .nav-item {
+    justify-content: flex-start;
+    text-align: left;
+  }
+
+  .month-picker {
+    width: 100%;
+  }
+
+  .month-picker select {
+    flex: 1;
+  }
 }
 
 @media (max-width: 560px) {
