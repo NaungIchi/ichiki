@@ -1,0 +1,231 @@
+/* Focused UI fixes for the responsive navigation and transaction dialog. */
+
+:root {
+  color-scheme: light;
+}
+
+body.dark {
+  color-scheme: dark;
+}
+
+/* Keep navigation actions vertically stacked at every viewport size. */
+.main-nav {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.main-nav .nav-item {
+  width: 100%;
+  justify-content: flex-start;
+  min-height: 48px;
+}
+
+@media (max-width: 760px) {
+  .main-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .main-nav .nav-item {
+    justify-content: flex-start;
+    text-align: left;
+  }
+}
+
+/* Make the CTA prominent, but remove it while the dialog is open. */
+.floating-add-transaction {
+  min-height: 64px;
+  padding: 16px 24px;
+  font-size: 1rem;
+  z-index: 25;
+  transition: transform .18s ease, opacity .18s ease, visibility .18s ease, box-shadow .18s ease;
+}
+
+body.modal-open .floating-add-transaction {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(12px) scale(.96);
+}
+
+/* Theme-aware, responsive modal surface and fields. */
+body.modal-open {
+  overflow: hidden;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: clamp(12px, 4vw, 40px);
+  background: rgba(2, 6, 23, .68);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  opacity: 1;
+  visibility: visible;
+}
+
+.modal-backdrop.hidden {
+  display: none;
+}
+
+.transaction-modal {
+  width: min(680px, 100%);
+  max-height: min(90vh, 760px);
+  overflow: auto;
+  padding: clamp(20px, 4vw, 32px);
+  color: var(--text);
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, .42);
+}
+
+body.dark .transaction-modal {
+  background: linear-gradient(145deg, rgba(19, 30, 52, .98), rgba(10, 16, 30, .98));
+}
+
+.transaction-modal .modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.transaction-modal h2 {
+  margin: 4px 0 0;
+  font-size: clamp(1.35rem, 4vw, 1.8rem);
+}
+
+.modal-close {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(148, 163, 184, .1);
+  color: var(--text);
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.transaction-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 5px;
+  margin-bottom: 20px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: rgba(148, 163, 184, .08);
+}
+
+.transaction-tab {
+  min-height: 44px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.transaction-tab.active {
+  color: #fff;
+  background: linear-gradient(135deg, var(--blue), var(--violet));
+  box-shadow: 0 8px 18px rgba(79, 140, 255, .2);
+}
+
+.transaction-form-grid,
+.repayment-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.transaction-form-grid .full {
+  grid-column: 1 / -1;
+}
+
+.transaction-modal label {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.transaction-modal label > span {
+  color: var(--muted);
+  font-size: .86rem;
+  font-weight: 700;
+}
+
+.transaction-modal input,
+.transaction-modal select {
+  width: 100%;
+  min-width: 0;
+  min-height: 46px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  outline: none;
+  background-color: var(--surface-solid);
+  color: var(--text);
+}
+
+body.dark .transaction-modal input,
+body.dark .transaction-modal select {
+  background-color: rgba(7, 11, 22, .72);
+}
+
+.transaction-modal input:focus,
+.transaction-modal select:focus,
+.transaction-tab:focus-visible,
+.modal-close:focus-visible {
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, .16);
+}
+
+/* Native select menus inherit the page theme where the browser supports it. */
+select {
+  color-scheme: inherit;
+}
+
+.repayment-row.hidden {
+  display: none;
+}
+
+@media (max-width: 560px) {
+  .floating-add-transaction {
+    right: 16px;
+    bottom: 16px;
+    min-height: 60px;
+    padding: 15px 20px;
+  }
+
+  .transaction-form-grid,
+  .repayment-row {
+    grid-template-columns: 1fr;
+    gap: 13px;
+  }
+
+  .transaction-form-grid .full {
+    grid-column: auto;
+  }
+
+  .transaction-tabs {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .floating-add-transaction {
+    transition: none;
+  }
+}
