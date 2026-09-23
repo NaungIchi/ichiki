@@ -2,164 +2,294 @@
   'use strict';
 
   const STORAGE_KEY = 'moneyflow-v3';
+  const SYNC_STATE_KEY = 'moneyflow-sync-state';
+  let syncInFlight = false;
 
-  const readState = () => {
+  const readJson = (key, fallback = {}) => {
     try {
-      return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-    } catch {
-      return {};
+      const raw = localStorage.getItem(key);
+      if (raw === null) return fallback;
+      return JSON.parse(raw);
+    } catch (_) {
+      return fallback;
     }
   };
 
-  const saveState = (state) => {
+  const writeJson = (key, value) => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch {
-      // no-op
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch (_) {
+      // Ignore write failures in private/incognito modes.
     }
   };
 
-  const showToast = (message, isError = false) => {
-    const node = document.getElementById('toast');
-    if (!node) return;
-    node.textContent = message;
-    node.dataset.tone = isError ? 'error' : 'success';
-    node.classList.add('on');
-    clearTimeout(showToast.timer);
-    showToast.timer = setTimeout(() => node.classList.remove('on'), 2800);
+  const readState = () => readJson(STORAGE_KEY, {});
+  const saveState = (state) => writeJson(STORAGE_KEY, state);
+
+  const getSyncUrl = () => {
+    const state = readState();
+    return String(state?.settings?.syncUrl || '').trim();
+  };
+
+  const setSyncUrl = (url) => {
+    const cleaned = String(url || '').trim();
+    const state = readState();
+    state.settings = state.settings || {};
+    state.settings.syncUrl = cleaned;
+    saveState(state);
+    const input = document.getElementById('syncUrl');
+    if (input) input.value = cleaned;
   };
 
   const setStatus = (message, tone = 'idle') => {
     const node = document.getElementById('syncStatus');
     if (!node) return;
+
     node.textContent = message;
     node.dataset.status = tone;
   };
 
-  const getSyncUrl = () => String(readState().settings?.syncUrl || '').trim();
+  const showToast = (message, tone = 'success') => {
+    const node = document.getElementById('toast');
+    if (!node) return;
 
-  const updateGreeting = () => {
-    const label = document.getElementById('greetLabel');
-    const title = document.getElementById('greetTitle');
-    const text = document.getElementById('focusMessage');
+    node.textContent = message;
+    node.dataset.tone = tone;
+    node.classList.add('on');
 
-    if (!label || !title || !text) return;
-
-    const hour = new Date().getHours();
-    const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
-
-    label.textContent = greeting.toUpperCase();
-    title.textContent = 'Your money story';
-
-    const copy = hour < 12
-      ? 'Start the day with a clear view of your money.'
-      : hour < 18
-      ? 'Keep your spending aligned with today’s plan.'
-      : 'Review today’s progress and plan tomorrow with confidence.';
-
-    text.textContent = copy;
+    clearTimeout(showToast.timer);
+    showToast.timer = setTimeout(() => {
+      node.classList.remove('on');
+    }, 2600);
   };
 
-  const ensureUrlField = () => {
-    if (document.getElementById('syncUrl')) return;
+  const ensureSyncUrlInput = () => {
+    const existing = document.getElementById('syncUrl');
+    if (existing) return existing;
+
     const settingsList = document.querySelector('#settings .settings-list');
-    if (!settingsList) return;
+    if (!settingsList) return null;
 
-    const wrapper = document.createElement('label');
-    wrapper.className = 'sync-url-row';
-    wrapper.innerHTML = `
+    const row = document.createElement('label');
+    row.className = 'sync-url-row';
+    row.innerHTML = `
       <span>Google Apps Script URL</span>
-      <input id="syncUrl" type="url" inputmode="url" placeholder="https://script.google.com/.../exec" autocomplete="url">
+      <input
+        id="syncUrl"
+        type="url"
+        inputmode="url"
+        placeholder="https://script.google.com/macros/s/AK.../exec"
+        autocomplete="url"
+      />
     `;
-    settingsList.appendChild(wrapper);
+
+    settingsList.appendChild(row);
+    return row.querySelector('input');
   };
 
-  const wireSyncUrlField = () => {
-    const input = document.getElementById('syncUrl');
-    if (!input || input.dataset.bound) return;
+  const wireSyncUrlInput = () => {
+    const input = ensureSyncUrlInput();
+    if (!input || input.dataset.bound === 'true') return;
+
     input.dataset.bound = 'true';
     input.value = getSyncUrl();
 
     input.addEventListener('input', (event) => {
+      const value = String(event.target.value || '').trim();
       const state = readState();
       state.settings = state.settings || {};
-      state.settings.syncUrl = event.target.value.trim();
+      state.settings.syncUrl = value;
       saveState(state);
-      setStatus(state.settings.syncUrl ? 'Ready to sync' : 'Sync URL required', state.settings.syncUrl ? 'idle' : 'warning');
+
+      setStatus(value ? 'Ready to sync' : 'Sync URL required', value ? 'idle' : 'warning');
     });
   };
 
   const askForSyncUrl = () => {
-    const entered = window.prompt('Enter your Google Apps Script /exec URL', getSyncUrl());
+    const current = getSyncUrl();
+    const entered = window.prompt('Enter your Google Apps Script /exec URL', current);
     if (!entered || !entered.trim()) return '';
+
+    const value = entered.trim();
+    setSyncUrl(value);
+    return value;
+  };
+
+  const requestJson = async (url, options = {}) => {
+    try {
+      const response = await fetch(url, options);
+
+      if (!response.ok) {
+        let errorText = '';
+        try {
+          const body = await response.json();
+          errorText = body?.error || body?.message || '';
+        } catch (_) {}
+        throw new Error(errorText || `Request failed (${response.status})`);
+      }
+
+      const text = await response.text();
+      if (!text) return {};
+      try {
+        return JSON.parse(text);
+      } catch (_) {
+        return { ok: true, raw: text };
+      }
+    } catch (error) {
+      throw new Error(error.message || 'Network request failed');
+    }
+  };
+
+  const applyRemoteData = (remote) => {
+    if (!remote || typeof remote !== 'object') {
+      throw new Error('The sheet returned no data');
+    }
+
     const state = readState();
-    state.settings = state.settings || {};
-    state.settings.syncUrl = entered.trim();
+    const incoming = remote.data || remote;
+
+    state.transactions = Array.isArray(incoming.transactions) ? incoming.transactions : [];
+    state.categories = Array.isArray(incoming.categories) && incoming.categories.length
+      ? incoming.categories
+      : (state.categories || []);
+    state.budgets = Array.isArray(incoming.budgets) ? incoming.budgets : [];
+    state.loans = Array.isArray(incoming.loans) ? incoming.loans : [];
+
     saveState(state);
+    window.dispatchEvent(new CustomEvent('moneyflow:state-updated'));
+    return state;
+  };
 
-    const input = document.getElementById('syncUrl');
-    if (input) input.value = state.settings.syncUrl;
+  const pullFromSheets = async (url, reason = 'manual') => {
+    if (!url) return false;
 
-    return state.settings.syncUrl;
+    setStatus('Loading from Google Sheets…', 'loading');
+
+    try {
+      const result = await requestJson(`${url}${url.includes('?') ? '&' : '?'}action=getAll`);
+      if (!result || result.ok === false) {
+        throw new Error(result?.error || 'Google Sheets did not return valid data.');
+      }
+
+      applyRemoteData(result.data || result);
+      setStatus('Loaded from Google Sheets', 'success');
+
+      if (reason === 'manual') {
+        showToast('Loaded data from Google Sheets.');
+      }
+
+      return true;
+    } catch (error) {
+      setStatus('Sync failed', 'error');
+      showToast(error.message || 'Could not load data from Google Sheets.', 'error');
+      return false;
+    }
+  };
+
+  const pushToSheets = async (url, state) => {
+    if (!url) return false;
+
+    const payload = {
+      action: 'appendDelta',
+      transactions: Array.isArray(state.transactions) ? state.transactions : [],
+      budgets: Array.isArray(state.budgets) ? state.budgets : [],
+      categories: Array.isArray(state.categories) ? state.categories : [],
+      loans: Array.isArray(state.loans) ? state.loans : [],
+      syncedAt: new Date().toISOString()
+    };
+
+    const result = await requestJson(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (result && result.ok === false) {
+      throw new Error(result.error || 'Google Sheets sync rejected the payload.');
+    }
+
+    return result;
   };
 
   const syncToGoogleSheets = async (reason = 'manual') => {
+    if (syncInFlight) return false;
     const url = getSyncUrl() || askForSyncUrl();
+
     if (!url) {
       setStatus('Sync URL required', 'warning');
-      showToast('Add your Google Apps Script URL in Settings.', true);
+      showToast('Add your Google Apps Script URL in Settings.', 'error');
       return false;
     }
 
-    const state = readState();
-    setStatus('Syncing…', 'loading');
+    syncInFlight = true;
 
     try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({
-          action: 'appendDelta',
-          transactions: state.transactions || [],
-          budgets: state.budgets || [],
-          categories: state.categories || [],
-          loans: state.loans || [],
-          syncedAt: new Date().toISOString()
-        })
-      });
+      setStatus('Syncing…', 'loading');
 
-      if (!response.ok) throw new Error('Sync failed');
+      await pushToSheets(url, readState());
+      await pullFromSheets(url, 'silent');
 
-      setStatus('Synced just now', 'success');
-      if (reason === 'manual') showToast('Synced to Google Sheets.');
+      setStatus('Synced and loaded just now', 'success');
+      if (reason === 'manual') {
+        showToast('Google Sheets sync completed.');
+      }
       return true;
-    } catch {
+    } catch (error) {
       setStatus('Sync failed', 'error');
-      showToast('Sync failed. Check your Apps Script URL and deployment access.', true);
+      showToast(error.message || 'Sync failed. Check the Apps Script URL and deployment.', 'error');
       return false;
+    } finally {
+      syncInFlight = false;
     }
   };
 
-  const init = () => {
-    updateGreeting();
-    ensureUrlField();
-    wireSyncUrlField();
-    setStatus(getSyncUrl() ? 'Ready to sync' : 'Sync URL required', getSyncUrl() ? 'idle' : 'warning');
-
-    const syncButton = document.getElementById('syncButton');
-    if (syncButton) {
-      syncButton.addEventListener('click', () => syncToGoogleSheets('manual'));
+  const maybeBindSyncButton = () => {
+    const button = document.getElementById('syncButton');
+    if (button && !button.dataset.boundSync) {
+      button.dataset.boundSync = 'true';
+      button.addEventListener('click', () => syncToGoogleSheets('manual'));
     }
+  };
 
-    document.addEventListener('submit', (event) => {
-      if (!event.target || !event.target.id) return;
-      if (['transactionForm', 'budgetForm', 'categoryForm'].includes(event.target.id) && getSyncUrl()) {
-        setTimeout(() => syncToGoogleSheets('save'), 250);
-      }
+  const maybeBindSaveTriggers = () => {
+    const formIds = ['transactionForm', 'budgetForm', 'categoryForm', 'loanForm'];
+    formIds.forEach((id) => {
+      const form = document.getElementById(id);
+      if (!form || form.dataset.boundSyncTriggers) return;
+
+      form.dataset.boundSyncTriggers = 'true';
+      form.addEventListener('submit', () => {
+        const url = getSyncUrl();
+        if (url) {
+          setTimeout(() => syncToGoogleSheets('save'), 250);
+        }
+      });
     });
+  };
+
+  const init = () => {
+    wireSyncUrlInput();
+
+    const url = getSyncUrl();
+    setStatus(url ? 'Ready to sync' : 'Sync URL required', url ? 'idle' : 'warning');
+
+    maybeBindSyncButton();
+    maybeBindSaveTriggers();
 
     window.syncToGoogleSheets = syncToGoogleSheets;
-    window.setInterval(updateGreeting, 60000);
+    window.pullFromGoogleSheets = () => {
+      const url = getSyncUrl() || askForSyncUrl();
+      return url ? pullFromSheets(url, 'manual') : false;
+    };
+
+    window.addEventListener('moneyflow:state-updated', () => {
+      const url = getSyncUrl();
+      if (url) {
+        setStatus('Data refreshed', 'success');
+      }
+    });
   };
 
   if (document.readyState === 'loading') {
