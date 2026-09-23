@@ -1,179 +1,100 @@
 (() => {
   'use strict';
-
   const STORAGE_KEY = 'moneyflow-v3';
-
-  const readState = () => {
-    try {
-      return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-    } catch {
-      return {};
-    }
-  };
-
-  const saveState = (state) => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch {
-      // Ignore storage write failures in static front-end mode.
-    }
-  };
-
-  const showToast = (message, isError = false) => {
-    const toast = document.getElementById('toast');
-    if (!toast) return;
-    toast.textContent = message;
-    toast.dataset.tone = isError ? 'error' : 'success';
-    toast.classList.add('show');
-    clearTimeout(showToast.timer);
-    showToast.timer = setTimeout(() => toast.classList.remove('show'), 2800);
-  };
-
-  const updateGreeting = () => {
-    const greetLabel = document.getElementById('greetLabel');
-    const greetTitle = document.getElementById('greetTitle');
-    const focusMessage = document.getElementById('focusMessage');
-    if (!greetLabel || !greetTitle || !focusMessage) return;
-
-    const hour = new Date().getHours();
-    let greeting = 'Good evening';
-    if (hour < 12) greeting = 'Good morning';
-    else if (hour < 18) greeting = 'Good afternoon';
-
-    greetLabel.textContent = greeting.toUpperCase();
-    greetTitle.textContent = 'Your money story';
-
-    const messages = [
-      'Everything is on track today.',
-      'Your money momentum looks healthy.',
-      'You are staying ahead of your plan.',
-      'You are making steady progress this week.'
-    ];
-    focusMessage.textContent = messages[(new Date().getHours() + new Date().getMinutes()) % messages.length];
-  };
-
-  const getSyncUrl = () => {
-    const state = readState();
-    return String(state?.settings?.syncUrl || '').trim();
-  };
-
-  const setSyncStatus = (message, tone = 'idle') => {
-    const node = document.getElementById('syncStatus');
+  const readState = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch { return {}; } };
+  const saveState = (state) => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {} };
+  const toast = (message, error = false) => {
+    const node = document.getElementById('toast');
     if (!node) return;
     node.textContent = message;
-    node.dataset.status = tone;
+    node.dataset.tone = error ? 'error' : 'success';
+    node.classList.add('on');
+    clearTimeout(toast.timer);
+    toast.timer = setTimeout(() => node.classList.remove('on'), 2800);
+  };
+  const status = (message, tone = 'idle') => {
+    const node = document.getElementById('syncStatus');
+    if (node) { node.textContent = message; node.dataset.status = tone; }
+  };
+  const syncUrl = () => String(readState().settings?.syncUrl || '').trim();
+
+  const updateGreeting = () => {
+    const label = document.getElementById('greetLabel');
+    const title = document.getElementById('greetTitle');
+    const message = document.getElementById('focusMessage');
+    if (!label || !title || !message) return;
+    const hour = new Date().getHours();
+    const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+    label.textContent = greeting.toUpperCase();
+    title.textContent = 'Your money story';
+    message.textContent = hour < 12 ? 'Start the day with a clear view of your money.' : hour < 18 ? 'Keep your spending aligned with today’s plan.' : 'Review today’s progress and plan tomorrow with confidence.';
   };
 
-  const syncGoogleSheets = async (reason = 'manual') => {
-    const state = readState();
-    const settings = state.settings || {};
-    let syncUrl = String(settings.syncUrl || '').trim();
+  const ensureUrlField = () => {
+    if (document.getElementById('syncUrl')) return;
+    const settings = document.querySelector('#settings .settings-list');
+    if (!settings) return;
+    const row = document.createElement('label');
+    row.className = 'sync-url-row';
+    row.innerHTML = '<span>Google Apps Script URL</span><input id="syncUrl" type="url" inputmode="url" placeholder="https://script.google.com/.../exec" autocomplete="url">';
+    settings.appendChild(row);
+  };
 
-    if (!syncUrl) {
-      const entered = window.prompt('Enter your Google Apps Script /exec URL', settings.syncUrl || '');
-      if (!entered) {
-        setSyncStatus('Sync URL required', 'warning');
-        showToast('Google Sheets URL is required to sync.', true);
-        return false;
-      }
-      syncUrl = entered.trim();
-      if (!syncUrl) {
-        setSyncStatus('Sync URL required', 'warning');
-        showToast('A valid Google Apps Script URL is required.', true);
-        return false;
-      }
-      settings.syncUrl = syncUrl;
-      state.settings = settings;
+  const wireUrlField = () => {
+    const input = document.getElementById('syncUrl');
+    if (!input || input.dataset.wired) return;
+    input.dataset.wired = 'true';
+    input.value = syncUrl();
+    input.addEventListener('input', (event) => {
+      const state = readState();
+      state.settings = state.settings || {};
+      state.settings.syncUrl = event.target.value.trim();
       saveState(state);
-      const syncUrlInput = document.getElementById('syncUrl');
-      if (syncUrlInput) syncUrlInput.value = syncUrl;
-    }
+      status(state.settings.syncUrl ? 'Ready to sync' : 'Sync URL required', state.settings.syncUrl ? 'idle' : 'warning');
+    });
+  };
 
-    setSyncStatus('Syncing…', 'loading');
+  const askForUrl = () => {
+    const entered = window.prompt('Enter your Google Apps Script /exec URL', syncUrl());
+    if (!entered || !entered.trim()) return '';
+    const state = readState();
+    state.settings = state.settings || {};
+    state.settings.syncUrl = entered.trim();
+    saveState(state);
+    const input = document.getElementById('syncUrl');
+    if (input) input.value = state.settings.syncUrl;
+    return state.settings.syncUrl;
+  };
+
+  const sync = async (reason = 'manual') => {
+    const url = syncUrl() || askForUrl();
+    if (!url) { status('Sync URL required', 'warning'); toast('Add your Google Apps Script URL in Settings.', true); return false; }
+    const state = readState();
+    status('Syncing…', 'loading');
     try {
-      const payload = {
-        action: 'replaceAll',
-        transactions: Array.isArray(state.transactions) ? state.transactions : [],
-        budgets: Array.isArray(state.budgets) ? state.budgets : [],
-        categories: Array.isArray(state.categories) ? state.categories : [],
-        loans: Array.isArray(state.loans) ? state.loans : [],
-        settings: settings
-      };
-
-      const response = await fetch(syncUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json;charset=utf-8' },
-        body: JSON.stringify(payload)
-      });
-
-      if (!response.ok) {
-        throw new Error('sync failed');
-      }
-
-      setSyncStatus('Synced just now', 'success');
-      if (reason === 'manual') showToast('Synced to Google Sheets.');
+      const response = await fetch(url, { method:'POST', headers:{ 'Content-Type':'text/plain;charset=utf-8' }, body:JSON.stringify({ action:'appendDelta', transactions:state.transactions || [], budgets:state.budgets || [], categories:state.categories || [], loans:state.loans || [], syncedAt:new Date().toISOString() }) });
+      if (!response.ok) throw new Error('Sync failed');
+      status('Synced just now', 'success');
+      if (reason === 'manual') toast('Synced to Google Sheets.');
       return true;
-    } catch (error) {
-      setSyncStatus('Sync failed', 'error');
-      showToast('Sync could not complete. Please check the URL.', true);
+    } catch {
+      status('Sync failed', 'error');
+      toast('Sync failed. Check your Apps Script URL and deployment access.', true);
       return false;
     }
   };
 
-  const wireSyncControls = () => {
-    const syncButton = document.getElementById('syncButton');
-    if (syncButton) {
-      syncButton.addEventListener('click', async (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        await syncGoogleSheets('manual');
-      });
-    }
-
-    const syncUrlInput = document.getElementById('syncUrl');
-    if (syncUrlInput) {
-      syncUrlInput.value = getSyncUrl();
-      syncUrlInput.addEventListener('input', (event) => {
-        const state = readState();
-        state.settings = state.settings || {};
-        state.settings.syncUrl = event.target.value.trim();
-        saveState(state);
-        setSyncStatus(getSyncUrl() ? 'Ready to sync' : 'Sync URL required', getSyncUrl() ? 'idle' : 'warning');
-      });
-    }
-  };
-
-  const autoSyncIfConfigured = () => {
-    const url = getSyncUrl();
-    if (!url) return;
-    setTimeout(() => syncGoogleSheets('save'), 200);
-  };
-
   const init = () => {
     updateGreeting();
-    wireSyncControls();
-    setSyncStatus(getSyncUrl() ? 'Ready to sync' : 'Sync URL required', getSyncUrl() ? 'idle' : 'warning');
-    window.syncToGoogleSheets = syncGoogleSheets;
-
+    ensureUrlField();
+    wireUrlField();
+    status(syncUrl() ? 'Ready to sync' : 'Sync URL required', syncUrl() ? 'idle' : 'warning');
+    window.syncToGoogleSheets = sync;
+    document.getElementById('syncButton')?.addEventListener('click', () => sync('manual'));
     document.addEventListener('submit', (event) => {
-      if (!event.target || !event.target.id) return;
-      if (['transactionForm', 'budgetForm', 'categoryForm'].includes(event.target.id)) {
-        setTimeout(() => autoSyncIfConfigured(), 220);
-      }
+      if (['transactionForm','budgetForm','categoryForm'].includes(event.target?.id) && syncUrl()) setTimeout(() => sync('save'), 250);
     });
-
-    document.addEventListener('click', (event) => {
-      const target = event.target;
-      if (!target || !(target instanceof HTMLElement)) return;
-      if (target.closest('[data-remove-tx]') || target.closest('[data-remove-budget]') || target.closest('[data-remove-category]')) {
-        setTimeout(() => autoSyncIfConfigured(), 220);
-      }
-    });
+    window.setInterval(updateGreeting, 60000);
   };
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init, { once: true });
-  } else {
-    init();
-  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once:true }); else init();
 })();
