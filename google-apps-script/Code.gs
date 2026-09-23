@@ -16,7 +16,7 @@ function json(value) {
 
 function doGet(e) {
   try {
-    const action = e && e.parameter ? e.parameter.action : '';
+    const action = e?.parameter?.action || '';
     if (action === 'getAll') return json({ ok: true, data: readAll() });
     if (action === 'status') return json({ ok: true, data: status() });
     return json({ ok: true, message: 'MoneyFlow API is running' });
@@ -27,8 +27,7 @@ function doGet(e) {
 
 function doPost(e) {
   try {
-    const body = e && e.postData && e.postData.contents ? e.postData.contents : '{}';
-    const request = JSON.parse(body);
+    const request = JSON.parse(e?.postData?.contents || '{}');
     if (request.action === 'getAll') return json({ ok: true, data: readAll() });
     if (request.action === 'status') return json({ ok: true, data: status() });
     if (request.action === 'appendDelta') return json({ ok: true, data: appendDelta(request) });
@@ -57,14 +56,6 @@ function rows(name, headers) {
   });
 }
 
-function writeTable(name, headers, values) {
-  const target = sheet(name, headers);
-  target.clearContents();
-  target.getRange(1, 1, 1, headers.length).setValues([headers]);
-  if (values.length) target.getRange(2, 1, values.length, headers.length).setValues(values);
-  target.setFrozenRows(1);
-}
-
 function num(value) {
   const result = Number(String(value == null ? '' : value).replace(/,/g, ''));
   return isFinite(result) ? result : 0;
@@ -90,18 +81,9 @@ function normalizeTransaction(value) {
   const item = value || {};
   let type = String(item.type || 'expense');
   const category = String(item.category || 'General');
-  if (type === 'loan' || category.toLowerCase() === 'loan') type = 'income';
+  if (category.toLowerCase() === 'loan') type = 'income';
   if (category.toLowerCase() === 'loan repayment' || category.toLowerCase() === 'loan payback') type = 'expense';
-  return {
-    id: String(item.id || Utilities.getUuid()),
-    type,
-    amount: num(item.amount),
-    date: formatDate(item.date),
-    category,
-    note: String(item.note || ''),
-    loanId: String(item.loanId || ''),
-    createdAt: iso(item.createdAt)
-  };
+  return { id: String(item.id || Utilities.getUuid()), type, amount: num(item.amount), date: formatDate(item.date), category, note: String(item.note || ''), loanId: String(item.loanId || ''), createdAt: iso(item.createdAt) };
 }
 
 function normalizeCategory(value) {
@@ -111,32 +93,13 @@ function normalizeCategory(value) {
 
 function normalizeBudget(value) {
   const item = value || {};
-  return {
-    id: String(item.id || Utilities.getUuid()),
-    category: String(item.category || '').trim(),
-    month: String(item.month || '').slice(0, 7),
-    amount: num(item.amount),
-    createdAt: iso(item.createdAt)
-  };
-}
-
-function normalizeGoal(value) {
-  const item = value || {};
-  return { name: String(item.name || '').trim(), target: num(item.target), saved: num(item.saved) };
+  return { id: String(item.id || Utilities.getUuid()), category: String(item.category || '').trim(), month: String(item.month || '').slice(0, 7), amount: num(item.amount), createdAt: iso(item.createdAt) };
 }
 
 function normalizeLoan(value) {
   const item = value || {};
   const principal = num(item.principal || item.amount);
-  return {
-    id: String(item.id || Utilities.getUuid()),
-    name: String(item.name || 'Loan').trim(),
-    principal,
-    remaining: Math.max(0, num(item.remaining === undefined ? principal : item.remaining)),
-    date: formatDate(item.date),
-    note: String(item.note || ''),
-    createdAt: iso(item.createdAt)
-  };
+  return { id: String(item.id || Utilities.getUuid()), name: String(item.name || 'Loan').trim(), principal, remaining: Math.max(0, num(item.remaining === undefined ? (item.balance === undefined ? principal : item.balance) : item.remaining)), date: formatDate(item.date), note: String(item.note || ''), createdAt: iso(item.createdAt) };
 }
 
 function uniqueCategories(values) {
@@ -149,9 +112,7 @@ function uniqueCategories(values) {
   return result;
 }
 
-function keyFor(item, field) {
-  return String(item && item[field] !== undefined ? item[field] : '');
-}
+function keyFor(item, field) { return String(item && item[field] !== undefined ? item[field] : ''); }
 
 function upsertTable(name, headers, values, field) {
   const target = sheet(name, headers);
@@ -159,12 +120,11 @@ function upsertTable(name, headers, values, field) {
   const merged = [...existingRows, ...values].reduce((result, item) => {
     const key = keyFor(item, field);
     if (!key) return result;
-    const index = result.findIndex((entry) => String(keyFor(entry, field)) === String(key));
+    const index = result.findIndex((entry) => keyFor(entry, field) === key);
     if (index >= 0) result[index] = item;
     else result.push(item);
     return result;
   }, []);
-
   target.clearContents();
   target.getRange(1, 1, 1, headers.length).setValues([headers]);
   if (merged.length) target.getRange(2, 1, merged.length, headers.length).setValues(merged.map((item) => headers.map((header) => item[header] ?? '')));
@@ -176,678 +136,42 @@ function appendDelta(payload) {
   const categories = uniqueCategories(payload.categories || []).filter((item) => item.name);
   const budgets = (payload.budgets || []).map(normalizeBudget).filter((item) => item.category && item.month);
   const loans = (payload.loans || []).map(normalizeLoan).filter((item) => item.id);
-
   if (transactions.length) upsertTable('Transactions', TRANSACTION_HEADERS, transactions, 'id');
   if (categories.length) upsertTable('Categories', CATEGORY_HEADERS, categories, 'name');
   if (budgets.length) upsertTable('Budgets', BUDGET_HEADERS, budgets, 'id');
   if (loans.length) upsertTable('Loans', LOAN_HEADERS, loans, 'id');
-
   return { synced: true, counts: { transactions: transactions.length, categories: categories.length, budgets: budgets.length, loans: loans.length } };
 }
 
 function readAll() {
-  const transactions = rows('Transactions', TRANSACTION_HEADERS).map(normalizeTransaction);
-  const categories = uniqueCategories(rows('Categories', CATEGORY_HEADERS));
-  const budgets = rows('Budgets', BUDGET_HEADERS).map(normalizeBudget).filter((item) => item.category);
-  const goals = rows('Goals', GOAL_HEADERS).map(normalizeGoal).filter((item) => item.name);
-  const loans = rows('Loans', LOAN_HEADERS).map(normalizeLoan);
-  const data = { transactions, categories, budgets, goals, loans };
-  data.revision = Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, JSON.stringify(data), Utilities.Charset.UTF_8));
-  return data;
+  return {
+    transactions: rows('Transactions', TRANSACTION_HEADERS).map(normalizeTransaction),
+    categories: uniqueCategories(rows('Categories', CATEGORY_HEADERS)),
+    budgets: rows('Budgets', BUDGET_HEADERS).map(normalizeBudget).filter((item) => item.category),
+    loans: rows('Loans', LOAN_HEADERS).map(normalizeLoan)
+  };
 }
 
 function status() {
   const data = readAll();
-  return { revision: data.revision, count: data.transactions.length, categoryCount: data.categories.length, budgetCount: data.budgets.length, goalCount: data.goals.length, loanCount: data.loans.length };
+  return { count: data.transactions.length, categoryCount: data.categories.length, budgetCount: data.budgets.length, loanCount: data.loans.length };
 }
 
 function writeAll(payload) {
   const transactions = (payload.transactions || []).map(normalizeTransaction);
   const categories = uniqueCategories(payload.categories || []);
   const budgets = (payload.budgets || []).map(normalizeBudget).filter((item) => item.category);
-  const goals = (payload.goals || []).map(normalizeGoal).filter((item) => item.name);
   const loans = (payload.loans || []).map(normalizeLoan).filter((item) => item.id);
-
+  const writeTable = (name, headers, values) => {
+    const target = sheet(name, headers);
+    target.clearContents();
+    target.getRange(1, 1, 1, headers.length).setValues([headers]);
+    if (values.length) target.getRange(2, 1, values.length, headers.length).setValues(values);
+    target.setFrozenRows(1);
+  };
   writeTable('Transactions', TRANSACTION_HEADERS, transactions.map((tx) => [tx.id, tx.type, tx.amount, tx.date, tx.category, tx.note, tx.loanId, tx.createdAt]));
   writeTable('Categories', CATEGORY_HEADERS, categories.map((item) => [item.name, item.type, item.createdAt]));
   writeTable('Budgets', BUDGET_HEADERS, budgets.map((item) => [item.id, item.category, item.month, item.amount, item.createdAt]));
-  writeTable('Goals', GOAL_HEADERS, goals.map((item) => [item.name, item.target, item.saved]));
   writeTable('Loans', LOAN_HEADERS, loans.map((item) => [item.id, item.name, item.principal, item.remaining, item.date, item.note, item.createdAt]));
   return readAll();
 }
-
-// Preserve compatibility with the existing spreadsheet naming and payload schema.
-function appendDeltaLegacy(payload) {
-  return appendDelta(payload);
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-n
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-n
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-"
